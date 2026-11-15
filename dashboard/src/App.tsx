@@ -23,6 +23,8 @@ export default function App() {
 
   const wasAlarmRef = useRef<boolean>(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  // Ultima temperatura generata dalla simulazione (evita effetti collaterali dentro setState)
+  const simTempRef = useRef<number>(24.5);
 
   // Inizializzazione sicura della Web Audio API per il beep di allarme
   const initAudio = () => {
@@ -45,14 +47,14 @@ export default function App() {
 
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
+
       osc.type = 'sine';
       osc.frequency.setValueAtTime(880, ctx.currentTime);
       gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      
+
       osc.connect(gain);
       gain.connect(ctx.destination);
-      
+
       osc.start();
       osc.stop(ctx.currentTime + 0.35);
     } catch (e) {
@@ -65,31 +67,37 @@ export default function App() {
     if (!isSimulation) return;
     setIsWakingUp(false);
 
-    const telemetryInterval = setInterval(() => {
-      setSensorData((prev) => {
-        const prevTemp = prev.temperature !== null ? prev.temperature : 24.5;
-        const delta = (Math.random() - 0.45) * 1.3;
-        let nextTemp = Number((prevTemp + delta).toFixed(2));
-        
-        if (nextTemp < 21.0) nextTemp = 21.0;
-        if (nextTemp > 35.0) nextTemp = 35.0;
+    // Ripartenza pulita ad ogni ingresso in modalità Demo
+    simTempRef.current = 24.5;
+    wasAlarmRef.current = false;
 
-        const nextStatus = nextTemp > 30.0 ? 'ALARM' : 'OK';
+    // Funzione di generazione: calcolo e beep fuori da setState (nessun doppio beep in StrictMode)
+    const triggerDemoTick = () => {
+      const delta = (Math.random() - 0.45) * 1.3;
+      let nextTemp = Number((simTempRef.current + delta).toFixed(2));
 
-        if (nextStatus === 'ALARM' && !wasAlarmRef.current) {
-          playBeep();
-        }
-        wasAlarmRef.current = (nextStatus === 'ALARM');
+      if (nextTemp < 21.0) nextTemp = 21.0;
+      if (nextTemp > 35.0) nextTemp = 35.0;
+      simTempRef.current = nextTemp;
 
-        const now = Date.now();
-        return {
-          temperature: nextTemp,
-          status: nextStatus,
-          timestamp: now,
-          serverTime: now,
-        };
+      const nextStatus: SensorPayload['status'] = nextTemp > 30.0 ? 'ALARM' : 'OK';
+
+      if (nextStatus === 'ALARM' && !wasAlarmRef.current) {
+        playBeep();
+      }
+      wasAlarmRef.current = (nextStatus === 'ALARM');
+
+      const now = Date.now();
+      setSensorData({
+        temperature: nextTemp,
+        status: nextStatus,
+        timestamp: now,
+        serverTime: now,
       });
-    }, 2000);
+    };
+
+    triggerDemoTick(); // Primo aggiornamento istantaneo al cambio di modalità
+    const telemetryInterval = setInterval(triggerDemoTick, 2000); // Poi ogni 2 secondi
 
     return () => clearInterval(telemetryInterval);
   }, [isSimulation]);
@@ -125,12 +133,14 @@ export default function App() {
         const age = data.serverTime - data.timestamp;
         const isOffline = data.timestamp === 0 || age > 20000; // 20 secondi di tolleranza
 
-        const nextStatus = isOffline ? 'OFFLINE' : (data.temperature > 30.0 ? 'ALARM' : 'OK');
+        const nextStatus: SensorPayload['status'] = isOffline
+          ? 'OFFLINE'
+          : (data.temperature > 30.0 ? 'ALARM' : 'OK');
 
         if (!isOffline && nextStatus === 'ALARM' && !wasAlarmRef.current) {
           playBeep();
         }
-        
+
         if (isOffline) {
           wasAlarmRef.current = false;
         } else {
@@ -176,11 +186,11 @@ export default function App() {
   const displayTemp = sensorData.temperature !== null ? sensorData.temperature.toFixed(2) : '--.--';
 
   return (
-    <div 
-      onClick={initAudio} 
+    <div
+      onClick={initAudio}
       className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12 flex flex-col items-center cursor-default"
     >
-      
+
       {/* Header */}
       <header className="w-full max-w-5xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-8 pb-6 border-b border-slate-800">
         <div>
@@ -194,18 +204,18 @@ export default function App() {
           </div>
           <p className="text-sm text-slate-400 mt-1">Sistema di Telemetria Ambientale &bull; ESP32 Node</p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           {/* Selettore di modalità interattivo */}
-          <button 
+          <button
             onClick={(e) => {
               e.stopPropagation();
               initAudio();
               setIsSimulation(!isSimulation);
             }}
             className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all border ${
-              isSimulation 
-                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20' 
+              isSimulation
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
                 : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
             }`}
           >
@@ -214,8 +224,8 @@ export default function App() {
 
           <div className="flex items-center gap-2 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 text-xs font-medium">
             <span className={`w-2 h-2 rounded-full ${
-              isSimulation 
-                ? 'bg-amber-400 animate-pulse' 
+              isSimulation
+                ? 'bg-amber-400 animate-pulse'
                 : (isWakingUp ? 'bg-amber-500 animate-ping' : (isLiveConnected ? 'bg-emerald-400 animate-ping' : 'bg-rose-500 animate-pulse'))
             }`} />
             <span className="text-slate-300">
@@ -240,7 +250,7 @@ export default function App() {
 
       {/* Main Grid */}
       <main className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
-        
+
         {/* Card Temperatura */}
         <div className={`p-8 rounded-3xl border transition-all duration-300 bg-slate-900/40 backdrop-blur-md relative overflow-hidden ${
           isAlarm ? 'border-rose-500/50 shadow-2xl shadow-rose-950/30' : 'border-slate-800/80 shadow-xl'
@@ -251,7 +261,7 @@ export default function App() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M14 14.76V3.5a2.5 2.5 0 00-5 0v11.26a4.5 4.5 0 105 0z" />
             </svg>
           </div>
-          
+
           <div className="flex items-baseline gap-3 my-4">
             <span className="text-7xl font-black tracking-tighter">
               {displayTemp}
@@ -281,23 +291,23 @@ export default function App() {
               </svg>
             )}
           </div>
-          
+
           <div className="my-6">
             <div className={`inline-flex items-center gap-3 px-5 py-3 rounded-2xl text-sm font-bold tracking-wide ${
-              isAlarm 
-                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
+              isAlarm
+                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                 : (isOffline && !isSimulation ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30')
             }`}>
               <span className={`w-3 h-3 rounded-full ${isAlarm ? 'bg-rose-500 animate-ping' : (isOffline && !isSimulation ? 'bg-slate-500' : 'bg-emerald-400')}`} />
-              {isAlarm 
-                ? 'ALLARME: LED ON (Soglia Superata)' 
+              {isAlarm
+                ? 'ALLARME: LED ON (Soglia Superata)'
                 : (isOffline && !isSimulation ? 'OFFLINE: In attesa di dati dal nodo...' : 'SISTEMA IN RANGE: LED OFF')}
             </div>
           </div>
 
           <p className="text-xs text-slate-400/80">
-            {isAlarm 
-              ? 'Il microcontrollore ha rilevato un valore critico e attivato l’attuatore locale sul pin 4 con feedback audio.' 
+            {isAlarm
+              ? 'Il microcontrollore ha rilevato un valore critico e attivato l’attuatore locale sul pin 4 con feedback audio.'
               : (isOffline && !isSimulation ? 'Nessun pacchetto recente ricevuto dal backend. Avvia la simulazione Wokwi per popolare i dati live.' : 'Parametri ambientali stabili. Nessuna anomalia rilevata dal nodo.')}
           </p>
         </div>
