@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface SensorPayload {
   temperature: number;
@@ -9,7 +9,7 @@ interface SensorPayload {
 export default function App() {
   // Modalità Demo attiva di default per un'esperienza immediata e senza attrito al primo caricamento
   const [isSimulation, setIsSimulation] = useState<boolean>(true);
-  const [temperature, setTemperature] = useState<number>(24.5);
+  const [, setTemperature] = useState<number>(24.5);
   const [sensorData, setSensorData] = useState<SensorPayload>({
     temperature: 24.5,
     status: 'OK',
