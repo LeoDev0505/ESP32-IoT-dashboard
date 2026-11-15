@@ -1,0 +1,15 @@
+# Dipendenze Node.js
+node_modules/
+**/node_modules/
+
+# Build e file di output (Vite / React)
+dist/
+build/
+
+# File di sistema e log
+.DS_Store
+*.log
+.env
+
+# Eseguibili locali
+cloudflared
