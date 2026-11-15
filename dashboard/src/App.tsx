@@ -1,21 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
 
 interface SensorPayload {
-  temperature: number;
-  status: 'OK' | 'ALARM';
-  timestamp: string;
+  temperature: number | null;
+  status: 'OK' | 'ALARM' | 'OFFLINE';
+  timestamp: number;
+  serverTime: number;
 }
 
+// Utilizza la variabile d'ambiente impostata su Netlify o ricade sull'endpoint cloud ufficiale
+const API_URL = import.meta.env.VITE_API_URL ?? 'https://esp32-iot-dashboard-xo8d.onrender.com/api/telemetry';
+
 export default function App() {
-  // Modalità Demo attiva di default per un'esperienza immediata e senza attrito al primo caricamento
   const [isSimulation, setIsSimulation] = useState<boolean>(true);
-  const [, setTemperature] = useState<number>(24.5);
   const [sensorData, setSensorData] = useState<SensorPayload>({
     temperature: 24.5,
     status: 'OK',
-    timestamp: '--:--:--',
+    timestamp: 0,
+    serverTime: Date.now(),
   });
   const [isLiveConnected, setIsLiveConnected] = useState<boolean>(false);
+  const [isWakingUp, setIsWakingUp] = useState<boolean>(false);
 
   const wasAlarmRef = useRef<boolean>(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -59,9 +63,11 @@ export default function App() {
   // 1. Motore di Simulazione (Modalità Demo)
   useEffect(() => {
     if (!isSimulation) return;
+    setIsWakingUp(false);
 
     const telemetryInterval = setInterval(() => {
-      setTemperature((prevTemp) => {
+      setSensorData((prev) => {
+        const prevTemp = prev.temperature !== null ? prev.temperature : 24.5;
         const delta = (Math.random() - 0.45) * 1.3;
         let nextTemp = Number((prevTemp + delta).toFixed(2));
         
@@ -75,58 +81,99 @@ export default function App() {
         }
         wasAlarmRef.current = (nextStatus === 'ALARM');
 
-        setSensorData({
+        const now = Date.now();
+        return {
           temperature: nextTemp,
           status: nextStatus,
-          timestamp: new Date().toLocaleTimeString(),
-        });
-
-        return nextTemp;
+          timestamp: now,
+          serverTime: now,
+        };
       });
     }, 2000);
 
     return () => clearInterval(telemetryInterval);
   }, [isSimulation]);
 
-  // 2. Motore Live (Chiamata Fetch periodica al Backend tramite Proxy Vite)
+  // 2. Motore Live (Chiamata Fetch asincrona con supporto Cold Start e serverTime)
   useEffect(() => {
     if (isSimulation) {
       setIsLiveConnected(false);
+      setIsWakingUp(false);
       return;
     }
 
-    const fetchLiveData = async () => {
+    let isMounted = true;
+
+    const fetchLiveData = async (isInitial: boolean) => {
+      // Al primo avvio concediamo fino a 25 secondi per il risveglio di Render (Cold Start)
+      const timeoutMs = isInitial ? 25000 : 5000;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+
+      if (isInitial) {
+        setIsWakingUp(true);
+      }
+
       try {
-        // Interroga l'endpoint gestito dal proxy Vite (reindirizzato a http://localhost:3000/api/telemetry)
-        const response = await fetch('/api/telemetry'); 
-        if (!response.ok) throw new Error('Errore di comunicazione con il server');
+        const response = await fetch(API_URL, { signal: ctrl.signal });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
 
-        const nextStatus = data.temperature > 30.0 ? 'ALARM' : 'OK';
-        
-        if (nextStatus === 'ALARM' && !wasAlarmRef.current) {
+        if (!isMounted) return;
+
+        // Calcolo dell'età del dato basato sul serverTime per evitare disallineamenti di orologio
+        const age = data.serverTime - data.timestamp;
+        const isOffline = data.timestamp === 0 || age > 20000; // 20 secondi di tolleranza
+
+        const nextStatus = isOffline ? 'OFFLINE' : (data.temperature > 30.0 ? 'ALARM' : 'OK');
+
+        if (!isOffline && nextStatus === 'ALARM' && !wasAlarmRef.current) {
           playBeep();
         }
-        wasAlarmRef.current = (nextStatus === 'ALARM');
+        
+        if (isOffline) {
+          wasAlarmRef.current = false;
+        } else {
+          wasAlarmRef.current = (nextStatus === 'ALARM');
+        }
 
         setSensorData({
           temperature: data.temperature,
           status: nextStatus,
-          timestamp: new Date().toLocaleTimeString(),
+          timestamp: data.timestamp,
+          serverTime: data.serverTime,
         });
-        setIsLiveConnected(true);
+        setIsLiveConnected(!isOffline);
+        setIsWakingUp(false);
       } catch (err) {
+        if (!isMounted) return;
+        console.error("Backend offline o in fase di risveglio:", err);
         setIsLiveConnected(false);
-        console.error("Backend offline o endpoint non raggiungibile:", err);
+        setIsWakingUp(false);
+        setSensorData((prev) => ({ ...prev, status: 'OFFLINE' }));
+      } finally {
+        clearTimeout(timer);
       }
     };
 
-    fetchLiveData();
-    const liveInterval = setInterval(fetchLiveData, 2000);
-    return () => clearInterval(liveInterval);
+    // Primo fetch immediato (con attesa estesa per Cold Start)
+    fetchLiveData(true);
+
+    // Polling periodico successivo ogni 3 secondi
+    const liveInterval = setInterval(() => {
+      fetchLiveData(false);
+    }, 3000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(liveInterval);
+    };
   }, [isSimulation]);
 
   const isAlarm = sensorData.status === 'ALARM';
+  const isOffline = sensorData.status === 'OFFLINE';
+  const formattedTime = sensorData.timestamp ? new Date(sensorData.timestamp).toLocaleTimeString() : '--:--:--';
+  const displayTemp = sensorData.temperature !== null ? sensorData.temperature.toFixed(2) : '--.--';
 
   return (
     <div 
@@ -135,7 +182,7 @@ export default function App() {
     >
       
       {/* Header */}
-      <header className="w-full max-w-5xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-10 pb-6 border-b border-slate-800">
+      <header className="w-full max-w-5xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-8 pb-6 border-b border-slate-800">
         <div>
           <div className="flex items-center gap-2.5">
             <span className="p-2 bg-cyan-500/10 rounded-xl border border-cyan-500/20 text-cyan-400">
@@ -167,14 +214,29 @@ export default function App() {
 
           <div className="flex items-center gap-2 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-800 text-xs font-medium">
             <span className={`w-2 h-2 rounded-full ${
-              isSimulation ? 'bg-amber-400 animate-pulse' : (isLiveConnected ? 'bg-emerald-400 animate-ping' : 'bg-rose-500 animate-pulse')
+              isSimulation 
+                ? 'bg-amber-400 animate-pulse' 
+                : (isWakingUp ? 'bg-amber-500 animate-ping' : (isLiveConnected ? 'bg-emerald-400 animate-ping' : 'bg-rose-500 animate-pulse'))
             }`} />
             <span className="text-slate-300">
-              {isSimulation ? 'ESP32 Sim (GPIO 15/4)' : (isLiveConnected ? 'Live Connected' : 'Live Offline')}
+              {isSimulation ? 'ESP32 Sim (GPIO 15/4)' : (isWakingUp ? 'Backend in risveglio...' : (isLiveConnected ? 'Live Connected' : 'Live Offline'))}
             </span>
           </div>
         </div>
       </header>
+
+      {/* Banner informativo in caso di Cold Start in corso */}
+      {isWakingUp && !isSimulation && (
+        <div className="w-full max-w-5xl mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Il server cloud su Render è in fase di risveglio (Cold Start). Questa operazione può richiedere fino a 30 secondi...
+          </span>
+        </div>
+      )}
 
       {/* Main Grid */}
       <main className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -192,14 +254,14 @@ export default function App() {
           
           <div className="flex items-baseline gap-3 my-4">
             <span className="text-7xl font-black tracking-tighter">
-              {sensorData.temperature.toFixed(2)}
+              {displayTemp}
             </span>
             <span className="text-3xl font-semibold text-slate-400">°C</span>
           </div>
 
           <div className="mt-8 pt-4 border-t border-slate-800/60 flex justify-between items-center text-xs text-slate-500">
             <span>Soglia firmware: &gt; 30.00 °C</span>
-            <span>Aggiornato: {sensorData.timestamp}</span>
+            <span>Aggiornato: {formattedTime}</span>
           </div>
         </div>
 
@@ -224,17 +286,19 @@ export default function App() {
             <div className={`inline-flex items-center gap-3 px-5 py-3 rounded-2xl text-sm font-bold tracking-wide ${
               isAlarm 
                 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
-                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : (isOffline && !isSimulation ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30')
             }`}>
-              <span className={`w-3 h-3 rounded-full ${isAlarm ? 'bg-rose-500 animate-ping' : 'bg-emerald-400'}`} />
-              {isAlarm ? 'ALLARME: LED ON (Soglia Superata)' : 'SISTEMA IN RANGE: LED OFF'}
+              <span className={`w-3 h-3 rounded-full ${isAlarm ? 'bg-rose-500 animate-ping' : (isOffline && !isSimulation ? 'bg-slate-500' : 'bg-emerald-400')}`} />
+              {isAlarm 
+                ? 'ALLARME: LED ON (Soglia Superata)' 
+                : (isOffline && !isSimulation ? 'OFFLINE: In attesa di dati dal nodo...' : 'SISTEMA IN RANGE: LED OFF')}
             </div>
           </div>
 
           <p className="text-xs text-slate-400/80">
             {isAlarm 
               ? 'Il microcontrollore ha rilevato un valore critico e attivato l’attuatore locale sul pin 4 con feedback audio.' 
-              : 'Parametri ambientali stabili. Nessuna anomalia rilevata dal nodo.'}
+              : (isOffline && !isSimulation ? 'Nessun pacchetto recente ricevuto dal backend. Avvia la simulazione Wokwi per popolare i dati live.' : 'Parametri ambientali stabili. Nessuna anomalia rilevata dal nodo.')}
           </p>
         </div>
 
