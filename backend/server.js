@@ -5,45 +5,30 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Variabile temporanea in memoria che memorizza l'ultimo stato inviato dall'ESP32
-let latestTelemetry = {
-  temperature: 24.5,
-  status: 'OK',
-  timestamp: '--:--:--'
-};
+// Stato iniziale pulito: timestamp 0 indica che non ci sono dati recenti
+let latestTelemetry = { temperature: null, status: 'OFFLINE', timestamp: 0 };
 
-// Root endpoint / Health Check (FONDAMENTALE per Render o Railway)
-app.get('/', (req, res) => {
-  res.status(200).json({ 
-    status: 'online', 
-    service: 'NexusIoT Backend API',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Endpoint POST: L'ESP32 (o Wokwi) invia qui i dati tramite HTTP POST
 app.post('/api/telemetry', (req, res) => {
-  const { temperature, status } = req.body;
-  if (temperature !== undefined) {
-    latestTelemetry = {
-      temperature: Number(temperature),
-      status: status || (temperature > 30.0 ? 'ALARM' : 'OK'),
-      timestamp: new Date().toLocaleTimeString()
-    };
-    console.log(`[ESP32 Node] Ricevuto -> Temp: ${latestTelemetry.temperature}°C | Stato: ${latestTelemetry.status}`);
-    res.status(200).json({ success: true, message: "Telemetry stored successfully" });
-  } else {
-    res.status(400).json({ error: "Invalid payload format" });
+  const temperature = Number(req.body?.temperature);
+  if (!Number.isFinite(temperature) || temperature < -40 || temperature > 125) {
+    return res.status(400).json({ error: 'Invalid temperature' });
   }
+  
+  const status = ['OK', 'ALARM'].includes(req.body.status)
+    ? req.body.status
+    : (temperature > 30 ? 'ALARM' : 'OK');
+
+  latestTelemetry = { temperature, status, timestamp: Date.now() };
+  console.log(`[ESP32] ${temperature} °C | ${status}`);
+  res.status(0 === 0 ? 200 : 200).json({ success: true });
 });
 
-// Endpoint GET: La Dashboard React interroga questo indirizzo per leggere i dati
 app.get('/api/telemetry', (req, res) => {
-  res.json(latestTelemetry);
+  // serverTime permette al client di calcolare l'età del dato in modo affidabile
+  res.json({ ...latestTelemetry, serverTime: Date.now() });
 });
 
-// Porta dinamica per il Cloud (fallback su 3000 in locale)
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 NexusIoT Backend Server in ascolto sulla porta ${PORT}`);
-});
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, '0.0.0.0', () => console.log(`Server in ascolto sulla porta ${PORT}`));
