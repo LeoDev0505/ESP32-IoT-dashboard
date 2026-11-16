@@ -12,7 +12,7 @@ The system provides real-time environmental monitoring, automated temperature th
 ```text
                  ┌─────────────────────────┐
                  │     DHT22 Sensor        │
-                 │   Temperature/Humidity │
+                 │   Temperature/Humidity  │
                  │       GPIO 15           │
                  └────────────┬────────────┘
                               │
@@ -21,10 +21,10 @@ The system provides real-time environmental monitoring, automated temperature th
                  │       ESP32             │
                  │   Arduino / C++         │
                  │                         │
-                 │  • Sensor acquisition  │
-                 │  • Threshold detection │
+                 │  • Sensor acquisition   │
+                 │  • Threshold detection  │
                  │  • LED control          │
-                 │  • Wi-Fi connectivity  │
+                 │  • Wi-Fi connectivity   │
                  └────────────┬────────────┘
                               │
                          HTTP POST
@@ -42,11 +42,11 @@ The system provides real-time environmental monitoring, automated temperature th
                               │
                               ▼
                  ┌─────────────────────────┐
-                 │    React Dashboard     │
+                 │    React Dashboard      │
                  │                         │
-                 │  • Live telemetry      │
-                 │  • Alarm notifications │
-                 │  • Interactive UI      │
+                 │  • Live telemetry       │
+                 │  • Alarm notifications  │
+                 │  • Interactive UI       │
                  │                         │
                  │      Vercel             │
                  └─────────────────────────┘
