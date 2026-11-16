@@ -10,7 +10,7 @@ The system provides real-time environmental monitoring, automated temperature th
 ## 🔗 Live Demo
 
 You can test the system live through cloud services:
-- **🌐 Web Dashboard (Netlify):** [🔗 Open Dashboard](INSERISCI_QUI_IL_LINK_DI_NETLIFY)
+- **🌐 Web Dashboard (Netlify):** [🔗 Open Dashboard](https://esp32-iot-dashboard.netlify.app/)
 - **⚙️ Backend API (Render):** [🔗 Test REST Endpoint](https://esp32-iot-dashboard-xo8d.onrender.com/api/telemetry)
 
 ## 🏗️ System Architecture
