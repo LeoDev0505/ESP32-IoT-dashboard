@@ -64,7 +64,7 @@ The architecture consists of three independent layers:
 
 2. **Backend API Layer (Node.js / Express):** A lightweight REST API receives incoming sensor measurements through `POST /api/telemetry` and exposes the latest telemetry state through `GET /api/telemetry`. The server uses CORS middleware and JSON request parsing and is deployed on Render.
 
-3. **Frontend Dashboard Layer (React / TypeScript):** A responsive web application retrieves telemetry data from the backend through periodic HTTP polling. It displays environmental measurements, system status, and visual alarm notifications. The frontend is built with Vite and Tailwind CSS and deployed on Vercel.
+3. **Frontend Dashboard Layer (React / TypeScript):** A responsive web application retrieves telemetry data from the backend through periodic HTTP polling. It displays environmental measurements, system status, and visual alarm notifications. The frontend is built with Vite and Tailwind CSS and deployed on Netlify.
 
 ---
 
@@ -104,7 +104,7 @@ The architecture consists of three independent layers:
 | Build Tool | Vite |
 | Styling | Tailwind CSS |
 | Communication | HTTP / REST API |
-| Cloud Deployment | Vercel |
+| Cloud Deployment | Netlify |
 
 ---
 
